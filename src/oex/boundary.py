@@ -6,10 +6,12 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
+import antimeridian
 import requests
 import shapely
 from pyproj import CRS, Geod, Transformer
-from shapely.geometry import mapping, shape
+from shapely.geometry import Point, mapping, shape
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform
 
 from oex.config.schema import BoundaryConfig
@@ -47,7 +49,7 @@ def area_sq_km(geometry: dict[str, Any]) -> float:
 
 
 _lock = threading.Lock()
-_cache: dict[tuple[str, str, str, str, str], Boundary] = {}
+_cache: dict[tuple[str, str, str, str, str, str], Boundary] = {}
 
 
 def _bbox_from_geometry(geometry: dict[str, Any]) -> tuple[float, float, float, float]:
@@ -127,22 +129,40 @@ def _from_user_geom(iso3: str, geom_str: str) -> Boundary:
     )
 
 
-def _buffered(boundary: Boundary, buffer_meters: float) -> Boundary:
+def _projection_centre(geom: BaseGeometry) -> Point:
+    """The centroid with longitudes read over [0, 360) when that makes the shape narrower,
+    so land spread across 180 degrees is centred where it lies."""
+    shifted = shapely.transform(geom, lambda xy: xy + [360.0, 0.0] * (xy[:, :1] < 0))
+    if _width(shifted) >= _width(geom):
+        return geom.centroid
+    centre = shifted.centroid
+    return Point((centre.x + 180.0) % 360.0 - 180.0, centre.y)
+
+
+def _width(geom: BaseGeometry) -> float:
+    return geom.bounds[2] - geom.bounds[0]
+
+
+def _buffered(boundary: Boundary, buffer_meters: float, simplify_meters: float) -> Boundary:
     # A metre in EPSG:3857 is inflated by 1/cos(latitude); an azimuthal equidistant
     # projection centred on the boundary keeps the buffer true at any latitude.
     geom = shape(json.loads(boundary.geojson))
-    centre = geom.centroid
+    centre = _projection_centre(geom)
     local = CRS.from_proj4(
         f"+proj=aeqd +lat_0={centre.y} +lon_0={centre.x} +datum=WGS84 +units=m +no_defs"
     )
     to_local = Transformer.from_crs(4326, local, always_xy=True).transform
     to_wgs84 = Transformer.from_crs(local, 4326, always_xy=True).transform
-    back = transform(to_wgs84, transform(to_local, geom).buffer(buffer_meters))
+    widened = transform(to_local, geom).buffer(buffer_meters).simplify(simplify_meters)
+    # Land on both sides of 180 degrees comes back as rings that jump across the globe;
+    # antimeridian splits them at the meridian again.
+    back = shape(antimeridian.fix_shape(mapping(transform(to_wgs84, widened)), fix_winding=True))
+    simplified = f", simplified {simplify_meters:g}m" if simplify_meters else ""
     return Boundary(
         iso3=boundary.iso3,
         bbox=back.bounds,
         geojson=json.dumps(mapping(back)),
-        source=f"{boundary.source} (buffered +{buffer_meters:g}m)",
+        source=f"{boundary.source} (buffered +{buffer_meters:g}m{simplified})",
     )
 
 
@@ -154,6 +174,13 @@ def resolve_boundary(iso3: str, cfg: BoundaryConfig) -> Boundary:
             f"boundary.buffer_meters must be >= 0; got {cfg.buffer_meters}. "
             "Inward buffers are not supported (would shrink the export area)."
         )
+    if cfg.simplify_meters < 0 or (
+        cfg.simplify_meters and cfg.simplify_meters >= cfg.buffer_meters
+    ):
+        raise ValueError(
+            f"boundary.simplify_meters must be >= 0 and below buffer_meters; "
+            f"got simplify_meters={cfg.simplify_meters}, buffer_meters={cfg.buffer_meters}"
+        )
     # Without cfg.geom in the key, two configs with different user geometries for
     # one country share an entry and the second exports the first one's area.
     key = (
@@ -161,6 +188,7 @@ def resolve_boundary(iso3: str, cfg: BoundaryConfig) -> Boundary:
         _GEOBOUNDARIES_RELEASE,
         cfg.geoboundaries_level,
         f"buf{cfg.buffer_meters:g}",
+        f"simplify{cfg.simplify_meters:g}",
         hashlib.sha256((cfg.geom or "").encode()).hexdigest(),
     )
     with _lock:
@@ -177,7 +205,7 @@ def resolve_boundary(iso3: str, cfg: BoundaryConfig) -> Boundary:
         boundary = _fetch_geoboundaries(iso3, cfg.geoboundaries_level)
 
     if cfg.buffer_meters > 0:
-        boundary = _buffered(boundary, cfg.buffer_meters)
+        boundary = _buffered(boundary, cfg.buffer_meters, cfg.simplify_meters)
 
     with _lock:
         _cache[key] = boundary

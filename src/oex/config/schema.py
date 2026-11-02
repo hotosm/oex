@@ -155,6 +155,8 @@ class BoundaryConfig:
     geom: str | None = None
     geoboundaries_level: str = "ADM0"
     buffer_meters: float = 0.0
+    # Simplification tolerance applied after the buffer, to keep the outline small.
+    simplify_meters: float = 0.0
 
 
 @dataclass

@@ -4,7 +4,7 @@ import json
 import math
 
 import pytest
-from shapely.geometry import mapping
+from shapely.geometry import Point, mapping, shape
 
 from oex.boundary import area_sq_km, resolve_boundary
 from oex.config.schema import BoundaryConfig
@@ -145,7 +145,7 @@ def test_buffer_distance_is_true_on_the_ground_not_in_mercator() -> None:
         geojson=json.dumps(mapping(centre.buffer(0.01))),
         source="test",
     )
-    widened = shape(json.loads(_buffered(boundary, 200.0).geojson))
+    widened = shape(json.loads(_buffered(boundary, 200.0, 0.0).geojson))
 
     geod = Geod(ellps="WGS84")
     before = abs(geod.geometry_area_perimeter(shape(json.loads(boundary.geojson)))[0])
@@ -154,6 +154,89 @@ def test_buffer_distance_is_true_on_the_ground_not_in_mercator() -> None:
     radius_before = math.sqrt(before / math.pi)
     radius_after = math.sqrt(after / math.pi)
     assert 195 < (radius_after - radius_before) < 205
+
+
+def test_a_buffer_across_180_degrees_reaches_its_distance_on_both_sides() -> None:
+    """Islands either side of the line, as in Fiji: a planar centroid would centre the
+    projection near Greenwich, and the reprojected rings would wrap the globe."""
+    islands = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [
+                [
+                    [179.90, -17.01],
+                    [179.91, -17.01],
+                    [179.91, -17.0],
+                    [179.90, -17.0],
+                    [179.90, -17.01],
+                ]
+            ],
+            [
+                [
+                    [-179.91, -17.01],
+                    [-179.90, -17.01],
+                    [-179.90, -17.0],
+                    [-179.91, -17.0],
+                    [-179.91, -17.01],
+                ]
+            ],
+        ],
+    }
+    boundary = resolve_boundary(
+        "FJX", BoundaryConfig(geom=json.dumps(islands), buffer_meters=10000.0)
+    )
+    widened = shape(json.loads(boundary.geojson))
+    km_in_degrees = 1 / (111.32 * math.cos(math.radians(17.005)))
+
+    assert widened.covers(Point(-179.90 + 9 * km_in_degrees, -17.005))
+    assert widened.covers(Point(179.90 - 9 * km_in_degrees, -17.005))
+    assert not widened.covers(Point(-179.90 + 11 * km_in_degrees, -17.005))
+    assert not widened.covers(Point(0.0, -17.005))
+    # Each square of about 1.06 by 1.11 km gains 10 km strips along its sides and quarter
+    # discs at its corners; the two widened squares barely overlap.
+    one_square = 1.06 * 1.11 + 2 * (1.06 + 1.11) * 10 + math.pi * 10**2
+    assert area_sq_km(mapping(widened)) == pytest.approx(2 * one_square, rel=0.02)
+
+
+_JAGGED = {
+    "type": "Polygon",
+    "coordinates": [
+        [
+            [
+                85.0 + 0.05 * math.cos(i * math.pi / 180) * (1 + 0.1 * (i % 2)),
+                28.0 + 0.05 * math.sin(i * math.pi / 180) * (1 + 0.1 * (i % 2)),
+            ]
+            for i in range(360)
+        ]
+        + [[85.0 + 0.05, 28.0]]
+    ],
+}
+
+
+def test_simplify_cuts_vertices_and_still_covers_the_land() -> None:
+    def outline(simplify_meters: float):
+        cfg = BoundaryConfig(
+            geom=json.dumps(_JAGGED), buffer_meters=1000.0, simplify_meters=simplify_meters
+        )
+        return shape(json.loads(resolve_boundary("JAG", cfg).geojson))
+
+    exact, simplified = outline(0.0), outline(500.0)
+
+    assert len(simplified.exterior.coords) < len(exact.exterior.coords) / 4
+    assert simplified.covers(shape(_JAGGED))
+
+
+@pytest.mark.parametrize(
+    ("buffer_meters", "simplify_meters"), [(1000.0, -1.0), (0.0, 500.0), (1000.0, 1000.0)]
+)
+def test_simplify_must_be_positive_and_follow_a_buffer(
+    buffer_meters: float, simplify_meters: float
+) -> None:
+    cfg = BoundaryConfig(
+        geom=json.dumps(_JAGGED), buffer_meters=buffer_meters, simplify_meters=simplify_meters
+    )
+    with pytest.raises(ValueError, match="simplify_meters"):
+        resolve_boundary("JAG", cfg)
 
 
 _DEGREE_SQUARE = {"type": "Polygon", "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]}

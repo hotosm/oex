@@ -90,6 +90,7 @@ def _parquet_fingerprint(cfg: RootConfig, *, clip: bool) -> str:
             "geom": boundary.geom,
             "level": boundary.geoboundaries_level,
             "buffer": boundary.buffer_meters,
+            "simplify": boundary.simplify_meters,
         }
     payload = json.dumps(
         # Which tags quackosm keeps shapes the parquet, so it is part of the key.

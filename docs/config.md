@@ -33,6 +33,7 @@ boundary:
   geom: null                       # optional inline GeoJSON (string)
   geoboundaries_level: ADM0
   buffer_meters: 0                 # outward buffer in metres (0 = off)
+  simplify_meters: 0               # simplification after the buffer (0 = off)
 ```
 
 If `geom` is set (a GeoJSON string), it overrides the geoBoundaries lookup;
@@ -43,6 +44,17 @@ with, measured in metres on the ground: the geometry is buffered in an
 azimuthal equidistant projection centred on it. 0 disables it. Use this for
 coastal countries or for cross-border features whose centroid sits a few
 hundred metres outside the legal boundary (jetties, bridges, airfields).
+A boundary with land on both sides of the 180th meridian is centred where the
+land lies and split at the meridian again after the buffer.
+
+`simplify_meters` simplifies the buffered outline with that tolerance, in the
+same projection. It must be below `buffer_meters`, which keeps the whole
+original boundary inside the outline. A detailed coastline then
+becomes a much smaller polygon to clip with and to publish.
+
+When `simplify_meters` is set, the simplified outline is also the geometry of
+each layer's STAC Item, so a GIS that maps a catalog shows the area each export
+covers. Otherwise the Item geometry is the bounding box of the data.
 
 A note on engines: the buffer drives the polygon used to extract the
 country PBF. For `source.osm.engine: geofabrik` the country PBF comes

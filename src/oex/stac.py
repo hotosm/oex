@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import antimeridian
 import pystac
 from pystac import ItemAssetDefinition
 from pystac.extensions.file import FileExtension
@@ -72,6 +73,8 @@ class LayerAssets:
     title: str | None = None
     # Wall time to build the layer's files, reading the source included and uploads excluded.
     export_seconds: float | None = None
+    # The export boundary as GeoJSON; the Item's footprint when set, else the data's bbox.
+    footprint: str | None = None
 
 
 def spdx_license(hdx_license: str) -> str:
@@ -175,12 +178,12 @@ def build_item(
     report = meta.metadata
     category = layer.category
     slug = slugify(category.name)
-    bbox = tuple(report.bbox) if report.bbox else None
+    geometry, bbox = _footprint(layer)
 
     item = pystac.Item(
         id=item_id(layer.dataset_name, meta.source_name),
-        geometry=_geometry(bbox) if bbox else None,
-        bbox=list(bbox) if bbox else None,
+        geometry=geometry,
+        bbox=bbox,
         datetime=_moment(meta.snapshot_label, meta.generated_utc),
         properties=_present(
             {
@@ -442,6 +445,17 @@ def _extent(items: list[pystac.Item]) -> pystac.Extent:
     if not any(item.bbox for item in items):
         extent.spatial = pystac.SpatialExtent([[-180.0, -90.0, 180.0, 90.0]])
     return extent
+
+
+def _footprint(layer: LayerAssets) -> tuple[dict[str, Any] | None, list[float] | None]:
+    if layer.footprint:
+        geometry = json.loads(layer.footprint)
+        # West exceeds east for an outline crossing 180 degrees, as RFC 7946 section 5.2 asks.
+        return geometry, antimeridian.bbox(geometry)
+    data_bbox = layer.source_metadata.metadata.bbox
+    if not data_bbox:
+        return None, None
+    return _geometry(tuple(data_bbox)), list(data_bbox)
 
 
 def _geometry(bbox: tuple[float, float, float, float]) -> dict[str, Any]:

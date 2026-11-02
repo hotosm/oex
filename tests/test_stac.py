@@ -51,6 +51,7 @@ def _layer(
     artifacts: list[str] | None = None,
     geoparquet_url: str | None = None,
     export_seconds: float | None = None,
+    footprint: str | None = None,
 ) -> LayerAssets:
     slug = slugify(name)
     report = MetadataReport(
@@ -102,6 +103,7 @@ def _layer(
         geoparquet_url=geoparquet_url,
         export_seconds=export_seconds,
         pmtiles_url=pmtiles_url,
+        footprint=footprint,
     )
 
 
@@ -538,6 +540,20 @@ def test_the_item_footprint_is_the_bbox_as_a_closed_lon_lat_ring():
     assert ring[2] == [east, north]
     assert ring[0] == ring[-1]
     assert len(ring) == 5
+
+
+def test_the_item_footprint_is_the_export_boundary_and_its_bbox_crosses_180():
+    """RFC 7946 section 5.2: a bbox over the antimeridian has its west above its east."""
+    islands = {
+        "type": "MultiPolygon",
+        "coordinates": [
+            [[[179.0, -17.0], [180.0, -17.0], [180.0, -16.0], [179.0, -16.0], [179.0, -17.0]]],
+            [[[-180.0, -17.0], [-179.0, -17.0], [-179.0, -16.0], [-180.0, -16.0], [-180.0, -17.0]]],
+        ],
+    }
+    item = build_item(_layer(footprint=json.dumps(islands)), _cfg())
+    assert item.geometry == islands
+    assert item.bbox == [179.0, -17.0, -179.0, -16.0]
 
 
 def test_a_dataset_with_no_footprint_still_writes_valid_json():

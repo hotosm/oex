@@ -339,3 +339,20 @@ def test_the_geometry_label_is_read_back_off_the_artifact_name() -> None:
     assert exporter._artifact_geometry(name) == "polygons"
     with pytest.raises(ValueError, match="no geometry label"):
         exporter._artifact_geometry(Path("hotosm_project_1_buildings_shp.zip"))
+
+
+@pytest.mark.parametrize(("simplify_meters", "embedded"), [(0.0, False), (500.0, True)])
+def test_only_a_simplified_outline_becomes_the_item_footprint(
+    simplify_meters: float, embedded: bool
+) -> None:
+    """A raw national outline can be over 100 MB, and every Item would carry a copy."""
+    from oex.config.schema import BoundaryConfig
+    from oex.exporter import Exporter
+
+    cfg = RootConfig(
+        iso3="NPL",
+        boundary=BoundaryConfig(buffer_meters=1000.0, simplify_meters=simplify_meters),
+    )
+    outline = '{"type":"Polygon","coordinates":[[[85,27],[86,27],[86,28],[85,27]]]}'
+    footprint = Exporter(cfg, Mock(name="osm"))._item_footprint(outline)
+    assert (footprint == outline) is embedded

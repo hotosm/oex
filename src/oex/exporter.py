@@ -565,6 +565,7 @@ class Exporter:
                             title=dataset_title(self._cfg, category),
                             source_metadata=source_metadata,
                             dataset_name=dt_name,
+                            footprint=self._item_footprint(boundary_obj.geojson),
                         ),
                         self._cfg,
                     )
@@ -659,6 +660,7 @@ class Exporter:
                     pmtiles_url=self._artifact_url(pmtiles_path, slug),
                     pmtiles_path=pmtiles_path,
                     export_seconds=export_seconds,
+                    footprint=self._item_footprint(boundary_obj.geojson),
                 )
                 item_path = self._write_layer_metadata(layer, out_root, metadata_json_path)
 
@@ -852,7 +854,9 @@ class Exporter:
 
         if publisher is None:
             # Written locally too, so the output directory reads as a catalog on its own.
-            self._write_combined_metadata(built_ok, out_root, dt_name, pmtiles_path)
+            self._write_combined_metadata(
+                built_ok, out_root, dt_name, pmtiles_path, boundary_geojson
+            )
             self._write_local_page(
                 built_ok,
                 out_root,
@@ -942,7 +946,9 @@ class Exporter:
             )
             for b in built_ok
         ]
-        metadata_path = self._write_combined_metadata(built_ok, out_root, dt_name, pmtiles_path)
+        metadata_path = self._write_combined_metadata(
+            built_ok, out_root, dt_name, pmtiles_path, boundary_geojson
+        )
         t_min, t_max = _combined_temporal_bounds([b.metadata_obj for b in built_ok])
         q0 = built_ok[0].query
         assert q0 is not None
@@ -997,12 +1003,17 @@ class Exporter:
                 "[%s/%s] combine: removed local outputs after upload", iso, self._runner.name
             )
 
+    def _item_footprint(self, boundary_geojson: str | None) -> str | None:
+        """Only a simplified outline is small enough to embed in every Item."""
+        return boundary_geojson if self._cfg.boundary.simplify_meters else None
+
     def _write_combined_metadata(
         self,
         built_ok: list[BuiltCategory],
         out_root: Path,
         dt_name: str,
         pmtiles_path: Path | None = None,
+        boundary_geojson: str | None = None,
     ) -> Path | None:
         """One Collection over every layer this source built, named per source so a second
         source's run does not overwrite the first's."""
@@ -1014,6 +1025,7 @@ class Exporter:
                 dataset_name=layer_dataset_name(self._cfg, b.category),
                 artifacts=b.zip_paths,
                 geoparquet_url=b.geoparquet_url,
+                footprint=self._item_footprint(boundary_geojson),
             )
             for b in built_ok
             if (metadata := b.source_metadata) is not None
