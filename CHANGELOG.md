@@ -64,6 +64,13 @@ and is auto-managed by [commitizen](https://commitizen-tools.github.io/commitize
 
 - **config**: config fix
 
+## v0.4.19 (2026-11-02)
+
+### Fix
+
+- **simplication**: add simplication feature and buffer for countries
+- **lint**: fix lint issues
+
 ## v0.4.18 (2026-10-20)
 
 ### Fix

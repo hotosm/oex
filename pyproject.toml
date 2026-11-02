@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "oex"
-version = "0.4.18"
+version = "0.4.19"
 description = "Country-scale OSM and Overture Maps vector datasets, exported to GIS formats and optionally published to HDX."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -115,7 +115,7 @@ show_missing = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
-version = "0.4.18"
+version = "0.4.19"
 version_files = ["pyproject.toml:^version", "src/oex/__init__.py:__version__"]
 tag_format = "v$version"
 update_changelog_on_bump = true
