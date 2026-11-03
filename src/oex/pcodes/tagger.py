@@ -2,7 +2,7 @@
 a 1-ring H3 lookup, which bounds memory, or an exact GEOS join, which can exhaust it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal
 
@@ -83,10 +83,7 @@ def _load_admin_table(
             adm{level}_name AS name,
             adm0_src AS adm0_pcode,
             adm0_name AS adm0_name,
-            ST_SimplifyPreserveTopology(
-                CAST(geometry AS GEOMETRY),
-                {_ADMIN_SIMPLIFY_TOLERANCE_DEG}
-            ) AS admin_geom
+            CAST(geometry AS GEOMETRY) AS admin_geom
         FROM read_parquet(?)
         WHERE iso_3 = ?
         """,
@@ -94,6 +91,36 @@ def _load_admin_table(
     )
     row = conn.execute(f"SELECT COUNT(*) FROM {target_table}").fetchone()
     return int(row[0]) if row else 0
+
+
+def write_country_admin_parquets(
+    conn: duckdb.DuckDBPyConnection,
+    *,
+    iso3: str,
+    cache_entries: dict[int, PcodeCacheEntry],
+    target_dir: Path,
+) -> dict[int, PcodeCacheEntry]:
+    """Every layer reloads the admin polygons, and simplifying a coast like Chile's takes
+    minutes, so each level is filtered to the country and simplified here, once per run."""
+    iso3_upper = iso3.upper()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    country_entries: dict[int, PcodeCacheEntry] = {}
+    for level, entry in cache_entries.items():
+        path = target_dir / f"adm{level}_{iso3_upper}.parquet"
+        conn.sql(
+            f"""
+            SELECT * REPLACE (
+                ST_SimplifyPreserveTopology(
+                    CAST(geometry AS GEOMETRY), {_ADMIN_SIMPLIFY_TOLERANCE_DEG}
+                ) AS geometry
+            )
+            FROM read_parquet(?)
+            WHERE iso_3 = ?
+            """,
+            params=[str(entry.path), iso3_upper],
+        ).write_parquet(str(path))
+        country_entries[level] = replace(entry, path=path)
+    return country_entries
 
 
 def _read_adm0(conn: duckdb.DuckDBPyConnection, source_table: str) -> tuple[str | None, str | None]:

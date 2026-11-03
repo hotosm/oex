@@ -56,6 +56,7 @@ from oex.pcodes import (
     ensure_admin_parquets,
     resolve_pcodes_config,
     tag_table,
+    write_country_admin_parquets,
 )
 from oex.pcodes.tagger import parse_boundary_resolution
 from oex.preflight import check_tile_builder, check_writable_paths
@@ -269,6 +270,9 @@ class Exporter:
 
         self._runner.prepare(self._cfg)
 
+        tags_pcodes = self._pcodes_cfg.enabled and any(
+            not category.skip_pcodes for category in self._cfg.categories
+        )
         # Serialise the download here so parallel-category threads share one cache.
         if self._pcodes_cfg.enabled:
             logger.info(
@@ -285,6 +289,18 @@ class Exporter:
                 parquet_url_template=self._pcodes_cfg.parquet_url_template,
                 manifest_group=self._pcodes_cfg.manifest_group,
             )
+            if tags_pcodes:
+                with connect(
+                    path=":memory:",
+                    memory_gb=self._cfg.parallel.memory_gb or self._adaptive_mem_gb,
+                    temp_dir=self._cfg.duckdb.temp_dir,
+                ) as admin_conn:
+                    self._pcode_cache = write_country_admin_parquets(
+                        admin_conn,
+                        iso3=iso,
+                        cache_entries=self._pcode_cache,
+                        target_dir=out_root / "_pcodes",
+                    )
 
         publisher: HdxPublisher | None = None
         if self._cfg.hdx.push:
@@ -339,6 +355,9 @@ class Exporter:
                 self._staged_collections,
                 area_title=self._area_title(),
             )
+
+        if tags_pcodes:
+            shutil.rmtree(out_root / "_pcodes")
 
         result.total_duration_s = time.time() - start
         logger.info(

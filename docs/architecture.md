@@ -106,6 +106,9 @@ DuckDB's httpfs extension reads these files with parallel HTTP range
 requests, applying the bbox filter at the parquet page level.
 
 **Pcode tagging: H3 index join.**
+Once per country run, the admin polygons of each level are filtered to the country,
+simplified, and written to parquet files in the run's output folder that every layer
+then reads.
 Admin pcodes are assigned in three stages:
 
 1. **Cover** - each admin polygon (adm1-adm4) is filled with

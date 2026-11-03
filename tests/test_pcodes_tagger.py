@@ -9,7 +9,7 @@ import duckdb
 import pytest
 
 from oex.pcodes.cache import PcodeCacheEntry
-from oex.pcodes.tagger import tag_table
+from oex.pcodes.tagger import _load_admin_table, tag_table, write_country_admin_parquets
 
 
 def _write_admin_parquet(
@@ -375,3 +375,97 @@ def test_tag_table_quotes_apostrophes_in_adm0_name(
 
     row = conn.execute("SELECT adm0_pcode, adm0_name FROM features").fetchone()
     assert row == ("CI'V", "Cote d'Ivoire")
+
+
+def test_country_admin_parquets_keep_only_the_country(
+    tmp_path: Path,
+    conn: duckdb.DuckDBPyConnection,
+    admin_cache: dict[int, PcodeCacheEntry],
+) -> None:
+    country = write_country_admin_parquets(
+        conn, iso3="npl", cache_entries=admin_cache, target_dir=tmp_path / "country"
+    )
+
+    assert set(country) == {1, 2}
+    assert country[1].upstream_date == admin_cache[1].upstream_date
+    rows = conn.execute(
+        "SELECT DISTINCT iso_3, adm1_src FROM read_parquet(?) ORDER BY adm1_src",
+        [str(country[1].path)],
+    ).fetchall()
+    assert rows == [("NPL", "NP01"), ("NPL", "NP02")]
+
+
+def _write_jagged_admin_parquet(conn: duckdb.DuckDBPyConnection, target: Path) -> Path:
+    """Vertices 0.00001 degrees off a straight edge sit inside the 0.0001 tolerance."""
+    jagged_edge = ", ".join(f"{x / 10} {0.00001 * (x % 2)}" for x in range(1, 100))
+    return _write_admin_parquet(
+        conn,
+        target=target,
+        level=1,
+        rows=[
+            {
+                "iso_3": "NPL",
+                "adm1_src": "NP01",
+                "adm1_name": "Jagged",
+                "adm0_src": "NPL",
+                "adm0_name": "Nepal",
+                "wkt": f"POLYGON((0 0, {jagged_edge}, 10 0, 10 10, 0 10, 0 0))",
+            }
+        ],
+    )
+
+
+def test_country_admin_parquets_are_simplified(
+    tmp_path: Path, conn: duckdb.DuckDBPyConnection
+) -> None:
+    adm1 = _write_jagged_admin_parquet(conn, tmp_path / "adm1_polygons.parquet")
+    cache = {1: PcodeCacheEntry(level=1, path=adm1, upstream_date="t", upstream_url="")}
+
+    country = write_country_admin_parquets(
+        conn, iso3="NPL", cache_entries=cache, target_dir=tmp_path / "country"
+    )
+
+    row = conn.execute(
+        "SELECT ST_NPoints(CAST(geometry AS GEOMETRY)) FROM read_parquet(?)",
+        [str(country[1].path)],
+    ).fetchone()
+    assert row is not None
+    assert row[0] == 5
+
+
+def test_tagging_from_country_admin_parquets_matches_the_global_files(
+    tmp_path: Path,
+    conn: duckdb.DuckDBPyConnection,
+    admin_cache: dict[int, PcodeCacheEntry],
+) -> None:
+    country = write_country_admin_parquets(
+        conn, iso3="NPL", cache_entries=admin_cache, target_dir=tmp_path / "country"
+    )
+    _make_features_table(conn, "from_global")
+    _make_features_table(conn, "from_country")
+
+    tag_table(conn, table="from_global", iso3="NPL", cache_entries=admin_cache, levels=[1, 2])
+    tag_table(conn, table="from_country", iso3="NPL", cache_entries=country, levels=[1, 2])
+
+    columns = "id, adm0_pcode, adm1_pcode, adm1_name, adm2_pcode, adm2_name"
+    from_global = conn.execute(f"SELECT {columns} FROM from_global ORDER BY id").fetchall()
+    from_country = conn.execute(f"SELECT {columns} FROM from_country ORDER BY id").fetchall()
+    assert from_country == from_global
+    assert from_global[0][2] == "NP01"
+
+
+def test_loading_admin_polygons_keeps_their_geometry(
+    tmp_path: Path, conn: duckdb.DuckDBPyConnection
+) -> None:
+    """Simplifying again would move vertices of an already simplified coast."""
+    adm1 = _write_jagged_admin_parquet(conn, tmp_path / "adm1_polygons.parquet")
+
+    _load_admin_table(conn, parquet_path=adm1, iso3="NPL", level=1, target_table="loaded")
+
+    row = conn.execute(
+        "SELECT (SELECT ST_NPoints(admin_geom) FROM loaded),"
+        " (SELECT ST_NPoints(CAST(geometry AS GEOMETRY)) FROM read_parquet(?))",
+        [str(adm1)],
+    ).fetchone()
+    assert row is not None
+    assert row[0] == row[1]

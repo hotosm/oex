@@ -8,7 +8,7 @@ from oex.pcodes.cache import (
     PcodeCacheError,
     ensure_admin_parquets,
 )
-from oex.pcodes.tagger import PcodeTagReport, tag_table
+from oex.pcodes.tagger import PcodeTagReport, tag_table, write_country_admin_parquets
 
 
 def resolve_pcodes_config(source: dict[str, Any]) -> PcodesSourceConfig:
@@ -32,4 +32,5 @@ __all__ = [
     "ensure_admin_parquets",
     "resolve_pcodes_config",
     "tag_table",
+    "write_country_admin_parquets",
 ]
