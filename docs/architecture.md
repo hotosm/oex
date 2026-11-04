@@ -87,10 +87,10 @@ The default OSM engine downloads the per-country PBF from Geofabrik.
 For countries Geofabrik does not publish, oex falls back to a local planet
 PBF:
 
-1. The country boundary polygon is expanded by the configured
-   `buffer_meters`, using an azimuthal equidistant projection centred on the
-   boundary so the distance is metres on the ground at that latitude, then
-   simplified by `simplify_meters` in the same projection.
+1. The country boundary polygon is simplified by `simplify_meters`, expanded
+   by the configured `buffer_meters`, and simplified again, all in an azimuthal
+   equidistant projection centred on the boundary so the distance is metres on
+   the ground at that latitude.
 2. `osmium extract --strategy=complete_ways` clips the planet PBF to that
    polygon, producing a country-sized PBF.
 3. [QuackOSM](https://github.com/kraina-ai/quackosm) converts the PBF to

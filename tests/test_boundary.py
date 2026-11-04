@@ -220,14 +220,14 @@ def test_simplify_cuts_vertices_and_still_covers_the_land() -> None:
         )
         return shape(json.loads(resolve_boundary("JAG", cfg).geojson))
 
-    exact, simplified = outline(0.0), outline(500.0)
+    exact, simplified = outline(0.0), outline(400.0)
 
     assert len(simplified.exterior.coords) < len(exact.exterior.coords) / 4
     assert simplified.covers(shape(_JAGGED))
 
 
 @pytest.mark.parametrize(
-    ("buffer_meters", "simplify_meters"), [(1000.0, -1.0), (0.0, 500.0), (1000.0, 1000.0)]
+    ("buffer_meters", "simplify_meters"), [(1000.0, -1.0), (0.0, 500.0), (1000.0, 500.0)]
 )
 def test_simplify_must_be_positive_and_follow_a_buffer(
     buffer_meters: float, simplify_meters: float

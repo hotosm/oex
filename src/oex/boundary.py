@@ -153,7 +153,10 @@ def _buffered(boundary: Boundary, buffer_meters: float, simplify_meters: float) 
     )
     to_local = Transformer.from_crs(4326, local, always_xy=True).transform
     to_wgs84 = Transformer.from_crs(local, 4326, always_xy=True).transform
-    widened = transform(to_local, geom).buffer(buffer_meters).simplify(simplify_meters)
+    # GEOS needs tens of GB to buffer a fjord coast at full detail. Each simplify moves edges
+    # by up to its tolerance, so two of them stay inside the buffer below half of it.
+    local_geom = transform(to_local, geom).simplify(simplify_meters)
+    widened = local_geom.buffer(buffer_meters).simplify(simplify_meters)
     # Land on both sides of 180 degrees comes back as rings that jump across the globe;
     # antimeridian splits them at the meridian again.
     back = shape(antimeridian.fix_shape(mapping(transform(to_wgs84, widened)), fix_winding=True))
@@ -175,10 +178,10 @@ def resolve_boundary(iso3: str, cfg: BoundaryConfig) -> Boundary:
             "Inward buffers are not supported (would shrink the export area)."
         )
     if cfg.simplify_meters < 0 or (
-        cfg.simplify_meters and cfg.simplify_meters >= cfg.buffer_meters
+        cfg.simplify_meters and cfg.simplify_meters * 2 >= cfg.buffer_meters
     ):
         raise ValueError(
-            f"boundary.simplify_meters must be >= 0 and below buffer_meters; "
+            f"boundary.simplify_meters must be >= 0 and below half of buffer_meters; "
             f"got simplify_meters={cfg.simplify_meters}, buffer_meters={cfg.buffer_meters}"
         )
     # Without cfg.geom in the key, two configs with different user geometries for
