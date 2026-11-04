@@ -64,6 +64,12 @@ and is auto-managed by [commitizen](https://commitizen-tools.github.io/commitize
 
 - **config**: config fix
 
+## v0.4.21 (2026-11-04)
+
+### Fix
+
+- **simplify**: fix simplify and bufffer
+
 ## v0.4.20 (2026-11-03)
 
 ### Fix
